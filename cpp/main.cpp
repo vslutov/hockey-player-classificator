@@ -24,40 +24,6 @@ void hockey::help()
     << endl;
 }
 
-void mouseHandler(int event, int x, int y, int, void*)
-{
-    if (event == CV_EVENT_LBUTTONDOWN && !drag)
-    {
-        /* left button clicked. ROI selection begins */
-        point1 = Point(x, y);
-        drag = 1;
-    }
-
-    if (event == CV_EVENT_MOUSEMOVE && drag)
-    {
-        /* mouse dragged. ROI being selected */
-        Mat img1 = frame.clone();
-        point2 = Point(x, y);
-        rectangle(img1, point1, point2, CV_RGB(255, 0, 0), 3, 8, 0);
-        imshow("image", img1);
-    }
-
-    if (event == CV_EVENT_LBUTTONUP && drag)
-    {
-        point2 = Point(x, y);
-        rect = Rect(point1.x,point1.y,x-point1.x,y-point1.y);
-        drag = 0;
-        roiImg = frame(rect);
-    }
-
-    if (event == CV_EVENT_LBUTTONUP)
-    {
-       /* ROI selected */
-        select_flag = 1;
-        drag = 0;
-    }
-}
-
 int
 main(int argc, char** argv) {
     cout.sync_with_stdio(false);
@@ -124,7 +90,7 @@ hockey::prepare_model(const string &videoPath)
 
 void
 hockey::process_video(const string &videoPath) {
-    const ssize_t HISTORY = 10;
+    const ssize_t HISTORY = 500;
 
     // create Background Subtractor objects
     Ptr<BackgroundSubtractor> pMOG2 = createBackgroundSubtractorMOG2(HISTORY); //MOG2 approach
@@ -175,7 +141,7 @@ hockey::process_video(const string &videoPath) {
         //update the background model
         pMOG2->apply(frame, fgMaskMOG2);
         threshold(fgMaskMOG2, fgMaskMOG2, 200, 255, THRESH_BINARY);
-        morphologyEx(fgMaskMOG2,fgMaskMOG2, MORPH_OPEN, kernel);
+        //morphologyEx(fgMaskMOG2,fgMaskMOG2, MORPH_OPEN, kernel);
 
         fgMaskMOG2.copyTo(fgMaskMOG2, background_mask);
         Mat labels = fgMaskMOG2;
@@ -192,7 +158,7 @@ hockey::process_video(const string &videoPath) {
         keyboard = waitKey(30);
         imshow("Frame", labels);
 
-        if (static_cast<char>(keyboard) == 's' || static_cast<char>(keyboard) == 's') {
+        if (true) { // (static_cast<char>(keyboard) == 's' || static_cast<char>(keyboard) == 's') {
             stringstream convert;
             string frame_number_str;
 
@@ -201,19 +167,6 @@ hockey::process_video(const string &videoPath) {
 
             imwrite(videoPath + "\\mask_" + frame_number_str + ".png", labels);
             imwrite(videoPath + "\\frame_" + frame_number_str + ".png", frame);
-        }
-
-        if (frame_number % 10 == 0) {
-            while(1)
-            {
-                rectangle(frame, rect, CV_RGB(255, 0, 0), 3, 8, 0);
-                imshow("image", frame);
-                int k = waitKey(10);
-                if (k == 27)
-                {
-                    break;
-                }
-            }
         }
     }
 }
