@@ -27,7 +27,7 @@ USER_INFO = """Classes:
     0 - Non-person
 """
 
-START_SAMPLE = 0
+START_SAMPLE = 45
 
 def get_filepath(source_dir, filename):
     return os.path.abspath(os.path.join(os.path.expanduser(source_dir), filename))
@@ -105,23 +105,34 @@ def user_interface(hockey_dir, interface_generator):
     interface_generator = interface_generator(hockey_dir, ax)
     updater = next(interface_generator)
 
+    def update(value):
+        nonlocal updater
+        updater.value = value
+        _quit()
+
+        try:
+            updater = next(interface_generator)
+            make_root()
+        except StopIteration:
+            pass
+
     def on_key_event(event):
         if event.key in '123450':
-            nonlocal updater
-            updater.value = event.key
-            try:
-                updater = next(interface_generator)
-                _quit()
-                make_root()
-            except StopIteration:
-                _quit()
-
+            update(event.key)
         key_press_handler(event, canvas, toolbar)
 
     def _quit():
         root.quit()     # stops mainloop
         root.destroy()  # this is necessary on Windows to prevent
                         # Fatal Python Error: PyEval_RestoreThread: NULL tstate
+
+    def add_button(root, value, text):
+        def h():
+            update(value)
+
+        button = Tk.Button(master=root, text=text, command=h)
+        button.pack(side=Tk.LEFT)
+        return h
 
     def make_root():
         nonlocal root, canvas, toolbar
@@ -142,6 +153,11 @@ def user_interface(hockey_dir, interface_generator):
 
         button = Tk.Button(master=root, text='Quit', command=_quit)
         button.pack(side=Tk.BOTTOM)
+        add_button(root, '1', 'Red team')
+        add_button(root, '2', 'White team')
+        add_button(root, '3', 'Orbiter')
+        add_button(root, '4', 'Double player')
+        add_button(root, '0', 'Non-person')
         Tk.mainloop()
 
     make_root()
