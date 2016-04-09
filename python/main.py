@@ -3,6 +3,7 @@
 import sys
 import os.path
 import itertools
+import csv
 
 if sys.version_info[0] < 3:
     import Tkinter as Tk
@@ -19,16 +20,6 @@ from matplotlib.figure import Figure
 
 from skimage import filters, segmentation, measure, io, morphology
 
-USER_INFO = """Classes:
-    1 - Red team
-    2 - White team
-    3 - Orbiter
-    4 - Double person
-    0 - Non-person
-"""
-
-START_SAMPLE = 45
-
 def get_filepath(source_dir, filename):
     return os.path.abspath(os.path.join(os.path.expanduser(source_dir), filename))
 
@@ -37,15 +28,20 @@ def markup(hockey_dir, ax):
         value = None
     updater = Updater()
 
-    print(USER_INFO)
-
     image_dir = get_filepath(hockey_dir, 'images')
     sample_num = 0
     sample_dir = get_filepath(hockey_dir, 'sample')
     os.makedirs(sample_dir, exist_ok=True)
 
-    with open(get_filepath(image_dir, 'gt.txt'), 'a') as gt:
-        for i in itertools.count(0, 10):
+    gt_filepath = get_filepath(image_dir, 'gt.txt')
+    start_sample = 0
+
+    with open(gt_filepath, 'r') as gt:
+        for line in csv.reader(gt):
+            start_sample = max(start_sample, int(line[0]))
+
+    with open(gt_filepath, 'a') as gt:
+        for i in itertools.count(0, 40):
             try:
                 frame_filename = 'frame_{i}.png'.format(i=i)
                 frame = io.imread(get_filepath(image_dir, frame_filename))
@@ -69,7 +65,7 @@ def markup(hockey_dir, ax):
                 if region.area < 250:
                     continue
 
-                if sample_num >= START_SAMPLE:
+                if sample_num > start_sample:
                     # draw rectangle around segmented coins
                     minr, minc, maxr, maxc = region.bbox
 
@@ -117,20 +113,22 @@ def user_interface(hockey_dir, interface_generator):
             pass
 
     def on_key_event(event):
-        if event.key in '123450':
+        if event.key in '1234560':
             update(event.key)
         key_press_handler(event, canvas, toolbar)
 
     def _quit():
+        nonlocal root
         root.quit()     # stops mainloop
         root.destroy()  # this is necessary on Windows to prevent
                         # Fatal Python Error: PyEval_RestoreThread: NULL tstate
+        root = None
 
     def add_button(root, value, text):
         def h():
             update(value)
 
-        button = Tk.Button(master=root, text=text, command=h)
+        button = Tk.Button(master=root, text="{value} - {text}".format(value=value, text=text), command=h)
         button.pack(side=Tk.LEFT)
         return h
 
@@ -156,11 +154,14 @@ def user_interface(hockey_dir, interface_generator):
         add_button(root, '1', 'Red team')
         add_button(root, '2', 'White team')
         add_button(root, '3', 'Orbiter')
-        add_button(root, '4', 'Double player')
+        add_button(root, '4', 'Intersection')
+        add_button(root, '5', 'Operator')
         add_button(root, '0', 'Non-person')
-        Tk.mainloop()
 
     make_root()
+
+    while root is not None:
+        Tk.mainloop()
 
 def main():
     if len(sys.argv) != 2:
