@@ -18,7 +18,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.backend_bases import key_press_handler
 from matplotlib.figure import Figure
 
+import skimage
 from skimage import filters, segmentation, measure, io, morphology, color
+from sklearn import neighbors, svm, cross_validation
 
 def get_filepath(source_dir, filename):
     return os.path.abspath(os.path.join(os.path.expanduser(source_dir), filename))
@@ -166,6 +168,69 @@ def user_interface(hockey_dir, interface_generator):
     while root is not None:
         Tk.mainloop()
 
+def validation(X, y):
+    _X, _y = np.array(X), np.array(y)
+    X = []
+    y = []
+    for i in range(_y.shape[0]):
+        if _y[i] != 0:
+            X.append(_X[i])
+            y.append(_y[i])
+
+    X = np.vstack(X)
+    y = np.hstack(y)
+
+    X_train, X_test, y_train, y_test = \
+        cross_validation.train_test_split(X, y, test_size=0.70, random_state=42)
+
+    clf = neighbors.KNeighborsClassifier(10, weights='distance', metric='manhattan')
+    clf.fit(X_train, y_train)
+    result = clf.predict(X_test)
+    result_mask = result == y_test
+
+    print(result_mask.sum() / result.shape[0])
+
+def hist(sample, sample_mask, bins, range):
+    range = np.array(range, dtype=np.float32)
+    range[1] += 0.001
+    step = (range[1] - range[0]) / bins
+    result = np.zeros((3, bins))
+
+    for c in [0, 1, 2]:
+        color = sample[:, :, c]
+        for i, start in enumerate(np.linspace(range[0], range[1],
+                                  bins, endpoint=False)):
+            mask = np.logical_and(color >= start, color < start + step)
+            val = np.logical_and(mask, sample_mask)
+            result[c, i] = np.count_nonzero(val)
+
+    result = result.reshape(-1)
+    return result / result.sum()
+
+def classify(hockey_dir):
+    image_dir = get_filepath(hockey_dir, 'images')
+    sample_dir = get_filepath(hockey_dir, 'sample')
+    gt_filepath = get_filepath(image_dir, 'gt.txt')
+
+    HIST_SIZE = 5
+    features = np.zeros((0, 3 * HIST_SIZE))
+    labels = []
+
+    with open(gt_filepath, 'r') as gt:
+        for sample_gt in csv.reader(gt):
+            sample_num = sample_gt[0]
+            sample = io.imread(get_filepath(sample_dir, 'sample_{sample_num}.png'.format(sample_num=sample_num)))
+            sample_mask = io.imread(get_filepath(sample_dir, 'sample_mask_{sample_num}.png'.format(sample_num=sample_num)))[:, :, 0] > 128
+
+            sample = color.rgb2lab(skimage.img_as_float(sample))
+
+            sample_hist = hist(sample, sample_mask, bins=HIST_SIZE, range=(-128, 128))
+
+            features = np.vstack([features, sample_hist])
+            labels.append(int(sample_gt[-1]))
+
+    validation(features, labels)
+
 def main():
     if len(sys.argv) != 2:
         print("usage: {command} hockey_dir".format(command=sys.argv[0]))
@@ -173,7 +238,8 @@ def main():
 
     hockey_dir = sys.argv[1]
 
-    user_interface(hockey_dir, markup)
+    # user_interface(hockey_dir, markup)
+    classify(hockey_dir)
 
 if __name__ == '__main__':
     main()
