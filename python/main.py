@@ -18,7 +18,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.backend_bases import key_press_handler
 from matplotlib.figure import Figure
 
-from skimage import filters, segmentation, measure, io, morphology
+from skimage import filters, segmentation, measure, io, morphology, color
 
 def get_filepath(source_dir, filename):
     return os.path.abspath(os.path.join(os.path.expanduser(source_dir), filename))
@@ -46,17 +46,19 @@ def markup(hockey_dir, ax):
                 frame_filename = 'frame_{i}.png'.format(i=i)
                 frame = io.imread(get_filepath(image_dir, frame_filename))
                 mask = io.imread(get_filepath(image_dir, 'mask_{i}.png'.format(i=i)))
+                mask = color.rgb2gray(mask)
 
             except FileNotFoundError:
                 break
 
-            # apply threshold
-            thresh = filters.threshold_otsu(mask)
-            bw = morphology.closing(mask > thresh, morphology.square(3))
 
+            # apply threshold
+            border = 0.05 * mask.shape[1]
+            bw = morphology.opening(mask[:, border:-border] > 128, morphology.disk(3))
             # remove artifacts connected to image border
-            cleared = bw.copy()
-            segmentation.clear_border(cleared)
+            segmentation.clear_border(bw)
+            cleared = np.zeros(mask.shape, dtype=np.bool)
+            cleared[:, border:-border] = bw
 
             # label image regions
             label_image = measure.label(cleared)
@@ -70,7 +72,8 @@ def markup(hockey_dir, ax):
                     minr, minc, maxr, maxc = region.bbox
 
                     sample = frame[minr:maxr, minc:maxc]
-                    sample_mask = cleared[minr:maxr, minc:maxc]
+                    sample_mask = cleared[minr:maxr, minc:maxc].astype(np.uint8) * 255
+                    sample_mask = np.dstack((sample_mask,) * 3)
                     io.imsave(get_filepath(sample_dir, 'sample_{sample_num}.png'.format(sample_num=sample_num)), sample)
                     io.imsave(get_filepath(sample_dir, 'sample_mask_{sample_num}.png'.format(sample_num=sample_num)), sample_mask)
 
