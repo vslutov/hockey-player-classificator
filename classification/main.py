@@ -19,8 +19,8 @@ from matplotlib.backend_bases import key_press_handler
 from matplotlib.figure import Figure
 
 import skimage
-from skimage import filters, segmentation, measure, io, morphology, color
-from sklearn import neighbors, svm, cross_validation
+from skimage import segmentation, measure, io, color
+from sklearn import neighbors, cross_validation
 
 def get_filepath(source_dir, filename):
     return os.path.abspath(os.path.join(os.path.expanduser(source_dir), filename))
@@ -36,11 +36,17 @@ def get_label(filled_image, previous_props):
                 return -1
     return result
 
-def update_previous(previous_props, next_props):
+def update_previous(previous_props, label_image):
     result = []
+    background = label_image == 0
+
     for prop, label in previous_props:
-        if sum(np.logical_and(region, prop).any() for region in next_props) == 1:
+        not_interesting = np.logical_not(prop)
+        interesting = np.ma.MaskedArray(label_image, not_interesting)
+        if np.logical_or(np.logical_or(background, not_interesting),
+                         label_image == interesting.max()).all():
             result.append((prop, label))
+
     return result
 
 def markup(hockey_dir, ax):
@@ -83,14 +89,7 @@ def markup(hockey_dir, ax):
             label_image = measure.label(cleared)
             current_props = measure.regionprops(label_image)
 
-            next_props = []
-            for region in current_props:
-                minr, minc, maxr, maxc = region.bbox
-                filled_image = np.zeros(frame.shape[:2], dtype=bool)
-                filled_image[minr:maxr, minc:maxc] = region.filled_image
-                next_props.append(filled_image)
-
-            previous_props = update_previous(previous_props, next_props)
+            previous_props = update_previous(previous_props, label_image)
             next_props = []
 
             for region in current_props:
