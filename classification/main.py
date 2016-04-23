@@ -25,13 +25,31 @@ from sklearn import neighbors, svm, cross_validation
 def get_filepath(source_dir, filename):
     return os.path.abspath(os.path.join(os.path.expanduser(source_dir), filename))
 
+def get_label(filled_image, previous_props):
+    result = -1
+
+    for prop, label in previous_props:
+        if np.logical_and(filled_image, prop).any():
+            if result == -1:
+                result = label
+            else:
+                return -1
+    return result
+
+def update_previous(previous_props, next_props):
+    result = []
+    for prop, label in previous_props:
+        if sum(np.logical_and(region, prop).any() for region in next_props) == 1:
+            result.append((prop, label))
+    return result
+
 def markup(hockey_dir, ax):
     class Updater:
         value = None
     updater = Updater()
 
     image_dir = get_filepath(hockey_dir, 'images')
-    sample_num = 0
+    sample_num = -1
     sample_dir = get_filepath(hockey_dir, 'sample')
     os.makedirs(sample_dir, exist_ok=True)
 
@@ -39,63 +57,82 @@ def markup(hockey_dir, ax):
     start_sample = 0
 
     with open(gt_filepath, 'r') as gt:
-        for line in csv.reader(gt):
-            start_sample = max(start_sample, int(line[0]))
+        previous_gt = [line for line in csv.reader(gt)]
+        if len(previous_gt) > 0:
+            start_sample = max(int(line[0]) for line in previous_gt)
 
     with open(gt_filepath, 'a') as gt:
-        for i in itertools.count(0, 40):
+        previous_props = []
+
+        for i in itertools.count(3600):
             try:
-                frame_filename = 'frame_{i}.png'.format(i=i)
+                frame_filename = 'input{i}.png'.format(i=i)
                 frame = io.imread(get_filepath(image_dir, frame_filename))
-                mask = io.imread(get_filepath(image_dir, 'mask_{i}.png'.format(i=i)))
+                mask = io.imread(get_filepath(image_dir, 'mask{i}.png'.format(i=i)))
                 mask = color.rgb2gray(mask)
 
             except FileNotFoundError:
                 break
 
-
             # apply threshold
-            border = 0.05 * mask.shape[1]
-            bw = morphology.opening(mask[:, border:-border] > 128, morphology.disk(3))
+            cleared = mask > 128
             # remove artifacts connected to image border
-            segmentation.clear_border(bw)
-            cleared = np.zeros(mask.shape, dtype=np.bool)
-            cleared[:, border:-border] = bw
+            segmentation.clear_border(cleared)
 
             # label image regions
             label_image = measure.label(cleared)
+            current_props = measure.regionprops(label_image)
 
-            for region in measure.regionprops(label_image):
+            next_props = []
+            for region in current_props:
+                minr, minc, maxr, maxc = region.bbox
+                filled_image = np.zeros(frame.shape[:2], dtype=bool)
+                filled_image[minr:maxr, minc:maxc] = region.filled_image
+                next_props.append(filled_image)
+
+            previous_props = update_previous(previous_props, next_props)
+            next_props = []
+
+            for region in current_props:
                 if region.area < 250:
                     continue
 
-                if sample_num > start_sample:
-                    # draw rectangle around segmented coins
-                    minr, minc, maxr, maxc = region.bbox
+                minr, minc, maxr, maxc = region.bbox
 
-                    sample = frame[minr:maxr, minc:maxc]
-                    sample_mask = cleared[minr:maxr, minc:maxc].astype(np.uint8) * 255
-                    sample_mask = np.dstack((sample_mask,) * 3)
+                sample = frame[minr:maxr, minc:maxc]
+                sample_mask = region.filled_image.astype(np.uint8) * 255
+                sample_mask = np.dstack((sample_mask,) * 3)
+                filled_image = np.zeros(frame.shape[:2], dtype=bool)
+                filled_image[minr:maxr, minc:maxc] = region.filled_image
+
+
+                if sample_num > start_sample:
                     io.imsave(get_filepath(sample_dir, 'sample_{sample_num}.png'.format(sample_num=sample_num)), sample)
                     io.imsave(get_filepath(sample_dir, 'sample_mask_{sample_num}.png'.format(sample_num=sample_num)), sample_mask)
 
-                    # show_image = frame.copy()
-                    # darken = np.logical_not(region.filled_image)
-                    # print(show_image[darken])
-                    # show_image[darken] = 0 # show_image[darken] / 2
+                    updater.value = get_label(filled_image, previous_props)
 
-                    rect = matplotlib.patches.Rectangle((minc, minr), maxc - minc, maxr - minr,
-                                      fill=False, edgecolor='red', linewidth=2)
+                    if updater.value == -1:
+                        rect = matplotlib.patches.Rectangle((minc, minr), maxc - minc, maxr - minr,
+                                          fill=False, edgecolor='red', linewidth=2)
 
-                    ax.cla()
-                    ax.imshow(frame)
-                    ax.add_patch(rect)
+                        ax.cla()
+                        ax.imshow(frame)
+                        ax.add_patch(rect)
 
-                    yield updater
+                        yield updater
+
                     print(sample_num, frame_filename, minr, minc, maxr, maxc, updater.value, sep=',', file=gt)
+
+                else:
+                    updater.value = previous_gt[sample_num - 1][-1]
+
+                next_props.append((filled_image, updater.value))
 
                 sample_num += 1
                 print(sample_num)
+
+            previous_props = next_props
 
 def user_interface(hockey_dir, interface_generator):
 
@@ -238,8 +275,8 @@ def main():
 
     hockey_dir = sys.argv[1]
 
-    # user_interface(hockey_dir, markup)
-    classify(hockey_dir)
+    user_interface(hockey_dir, markup)
+    # classify(hockey_dir)
 
 if __name__ == '__main__':
     main()
