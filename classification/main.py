@@ -19,7 +19,7 @@ from matplotlib.backend_bases import key_press_handler
 from matplotlib.figure import Figure
 
 import skimage
-from skimage import segmentation, measure, io, color
+from skimage import segmentation, measure, io, color, transform
 from sklearn import neighbors, cross_validation
 
 def get_filepath(source_dir, filename):
@@ -49,18 +49,26 @@ def update_previous(previous_props, label_image):
 
     return result
 
+def append_samples(samples_filepath, new_samples):
+    if os.path.isfile(samples_filepath):
+        samples = np.load(samples_filepath)
+    else:
+        samples = np.zeros((0, 128, 64, 4))
+    samples = np.vstack((samples, np.array(new_samples)))
+    np.save(samples_filepath, samples, allow_pickle=False, fix_imports=True)
+
 def markup(hockey_dir, ax):
     class Updater:
         value = None
     updater = Updater()
 
+    new_samples = []
+
     image_dir = get_filepath(hockey_dir, 'images')
-    sample_num = -1
-    sample_dir = get_filepath(hockey_dir, 'sample')
-    os.makedirs(sample_dir, exist_ok=True)
+    sample_num = 0
 
     gt_filepath = get_filepath(image_dir, 'gt.txt')
-    start_sample = 0
+    start_sample = -1
 
     with open(gt_filepath, 'r') as gt:
         previous_gt = [line for line in csv.reader(gt)]
@@ -98,16 +106,15 @@ def markup(hockey_dir, ax):
 
                 minr, minc, maxr, maxc = region.bbox
 
-                sample = frame[minr:maxr, minc:maxc]
-                sample_mask = region.filled_image.astype(np.uint8) * 255
-                sample_mask = np.dstack((sample_mask,) * 3)
                 filled_image = np.zeros(frame.shape[:2], dtype=bool)
                 filled_image[minr:maxr, minc:maxc] = region.filled_image
 
-
                 if sample_num > start_sample:
-                    io.imsave(get_filepath(sample_dir, 'sample_{sample_num}.png'.format(sample_num=sample_num)), sample)
-                    io.imsave(get_filepath(sample_dir, 'sample_mask_{sample_num}.png'.format(sample_num=sample_num)), sample_mask)
+
+                    sample = transform.resize(frame[minr:maxr, minc:maxc], (128, 64))
+                    sample_mask = region.filled_image.astype(np.uint8) * 255
+                    sample_mask = transform.resize(sample_mask, (128, 64))
+                    sample = np.dstack((sample, sample_mask))
 
                     updater.value = get_label(filled_image, previous_props)
 
@@ -121,15 +128,21 @@ def markup(hockey_dir, ax):
 
                         yield updater
 
-                    print(sample_num, frame_filename, minr, minc, maxr, maxc, updater.value, sep=',', file=gt)
+                    if updater.value == -1:
+                        append_samples(get_filepath(hockey_dir, 'samples.npy'),
+                                       new_samples)
+                        return
+                    else:
+                        new_samples.append(sample)
+                        print(sample_num, frame_filename, minr, minc, maxr, maxc, updater.value, sep=',', file=gt)
 
                 else:
-                    updater.value = previous_gt[sample_num - 1][-1]
+                    updater.value = previous_gt[sample_num][-1]
 
                 next_props.append((filled_image, updater.value))
 
-                sample_num += 1
                 print(sample_num)
+                sample_num += 1
 
             previous_props = next_props
 
@@ -145,7 +158,7 @@ def user_interface(hockey_dir, interface_generator):
     def update(value):
         nonlocal updater
         updater.value = value
-        _quit()
+        _quit(quit=False)
 
         try:
             updater = next(interface_generator)
@@ -158,8 +171,14 @@ def user_interface(hockey_dir, interface_generator):
             update(event.key)
         key_press_handler(event, canvas, toolbar)
 
-    def _quit():
-        nonlocal root
+    def _quit(quit=True):
+        nonlocal root, updater
+        if quit:
+            updater.value = -1
+            try:
+                updater = next(interface_generator)
+            except StopIteration:
+                pass
         root.quit()     # stops mainloop
         root.destroy()  # this is necessary on Windows to prevent
                         # Fatal Python Error: PyEval_RestoreThread: NULL tstate
@@ -268,14 +287,18 @@ def classify(hockey_dir):
     validation(features, labels)
 
 def main():
-    if len(sys.argv) != 2:
-        print("usage: {command} hockey_dir".format(command=sys.argv[0]))
+    if len(sys.argv) != 3:
+        print("usage: {command} (markup|classify) hockey_dir".format(command=sys.argv[0]))
         sys.exit(1)
 
-    hockey_dir = sys.argv[1]
+    hockey_dir = sys.argv[2]
 
-    user_interface(hockey_dir, markup)
-    # classify(hockey_dir)
+    if sys.argv[1] == 'markup':
+        user_interface(hockey_dir, markup)
+    elif sys.argv[1] == 'classify':
+        classify(hockey_dir)
+    else:
+        print('Unknown command!', file=sys.stderr)
 
 if __name__ == '__main__':
     main()
