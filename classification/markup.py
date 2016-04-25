@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import sys
 import os.path
+import glob
 import itertools
 import csv
 
@@ -19,7 +21,6 @@ from matplotlib.backend_bases import key_press_handler
 from matplotlib.figure import Figure
 
 from skimage import segmentation, measure, io, color, transform
-from sklearn import neighbors, cross_validation
 
 def get_filepath(source_dir, filename):
     return os.path.abspath(os.path.join(os.path.expanduser(source_dir), filename))
@@ -48,31 +49,85 @@ def update_previous(previous_props, label_image):
 
     return result
 
-def append_samples(samples_filepath, new_samples):
-    if os.path.isfile(samples_filepath):
-        samples = np.load(samples_filepath)
-    else:
-        samples = np.zeros((0, 128, 64, 4))
-    samples = np.vstack((samples, np.array(new_samples)))
-    np.save(samples_filepath, samples, allow_pickle=False, fix_imports=True)
+def get_max_sample(gt_filepath):
+    max_sample = -1
+    with open(gt_filepath, 'r') as gt:
+        previous_gt = [line for line in csv.reader(gt)]
+        if len(previous_gt) > 0:
+            max_sample = max(int(line[0]) for line in previous_gt)
+    return max_sample
+
+def save_samples(hockey_dir, new_samples):
+    np.save(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=new_samples[0])),
+            np.array(new_samples[1]))
+    new_samples[0] += 1
+    new_samples[1] = []
+
+def update_samples(hockey_dir, ):
+    for filename in glob.iglob(get_filepath(hockey_dir, 'samples_*.npy')):
+        os.remove(filename)
+
+    image_dir = get_filepath(hockey_dir, 'images')
+    sample_num = 0
+    new_samples = [0, []]
+
+    for i in itertools.count(3600):
+        try:
+            frame_filename = 'input{i}.png'.format(i=i)
+            frame = io.imread(get_filepath(image_dir, frame_filename))
+            mask = io.imread(get_filepath(image_dir, 'mask{i}.png'.format(i=i)))
+            mask = color.rgb2gray(mask)
+
+        except FileNotFoundError:
+            save_samples(hockey_dir, new_samples)
+            break
+
+        # apply threshold
+        cleared = mask > 128
+        # remove artifacts connected to image border
+        segmentation.clear_border(cleared)
+
+        # label image regions
+        label_image = measure.label(cleared)
+        current_props = measure.regionprops(label_image)
+
+        for region in current_props:
+            if region.area < 250:
+                continue
+
+            minr, minc, maxr, maxc = region.bbox
+
+            filled_image = np.zeros(frame.shape[:2], dtype=bool)
+            filled_image[minr:maxr, minc:maxc] = region.filled_image
+
+
+            sample = transform.resize(frame[minr:maxr, minc:maxc], (64, 32))
+            sample_mask = region.filled_image.astype(np.uint8) * 255
+            sample_mask = transform.resize(sample_mask, (64, 32))
+            sample = np.dstack((sample, sample_mask))
+
+            new_samples[1].append(sample)
+
+            print(sample_num)
+            sample_num += 1
+
+            if sample_num % 1000 == 0:
+                save_samples(hockey_dir, new_samples)
+
 
 def markup(hockey_dir, ax):
     class Updater:
         value = None
     updater = Updater()
 
-    new_samples = []
-
     image_dir = get_filepath(hockey_dir, 'images')
     sample_num = 0
 
-    gt_filepath = get_filepath(image_dir, 'gt.txt')
-    start_sample = -1
+    gt_filepath = get_filepath(hockey_dir, 'gt.txt')
+    start_sample = get_max_sample(gt_filepath)
 
     with open(gt_filepath, 'r') as gt:
         previous_gt = [line for line in csv.reader(gt)]
-        if len(previous_gt) > 0:
-            start_sample = max(int(line[0]) for line in previous_gt)
 
     with open(gt_filepath, 'a') as gt:
         previous_props = []
@@ -110,11 +165,6 @@ def markup(hockey_dir, ax):
 
                 if sample_num > start_sample:
 
-                    sample = transform.resize(frame[minr:maxr, minc:maxc], (128, 64))
-                    sample_mask = region.filled_image.astype(np.uint8) * 255
-                    sample_mask = transform.resize(sample_mask, (128, 64))
-                    sample = np.dstack((sample, sample_mask))
-
                     updater.value = get_label(filled_image, previous_props)
 
                     if updater.value == -1:
@@ -128,11 +178,8 @@ def markup(hockey_dir, ax):
                         yield updater
 
                     if updater.value == -1:
-                        append_samples(get_filepath(hockey_dir, 'samples.npy'),
-                                       new_samples)
                         return
                     else:
-                        new_samples.append(sample)
                         print(sample_num, frame_filename, minr, minc, maxr, maxc, updater.value, sep=',', file=gt)
 
                 else:
@@ -221,95 +268,3 @@ def user_interface(hockey_dir, interface_generator):
 
     while root is not None:
         Tk.mainloop()
-
-def validation(X, y):
-    _X, _y = np.array(X), np.array(y)
-    X = []
-    y = []
-    for i in range(_y.shape[0]):
-        if _y[i] not in [0, 4]:
-            X.append(_X[i])
-            y.append(_y[i])
-
-    X = np.array(X)
-    y = np.array(y)
-
-    train_size = int(X.shape[0] * 0.2)
-
-    X_train, X_test, y_train, y_test = \
-        X[:train_size], X[train_size:], y[:train_size], y[train_size:]
-        # cross_validation.train_test_split(X, y, test_size=0.8, random_state=42)
-
-    clf = neighbors.KNeighborsClassifier(10, weights='distance', metric='manhattan')
-    clf.fit(X_train, y_train)
-    result = clf.predict(X_test)
-    result_mask = result == y_test
-
-    print(result_mask.sum() / result.shape[0])
-
-def hist(sample, bins):
-    begin, end = -128, 128.001
-    step = (end - begin) / bins
-    result = np.zeros((3, bins))
-
-    sample_mask = sample[:, :, 3] > 0.5
-    sample[:, :, 0:3] = color.rgb2lab(sample[:, :, 0:3])
-
-    for c in [0, 1, 2]:
-        channel = sample[:, :, c]
-        for i, start in enumerate(np.linspace(begin, end,
-                                              bins, endpoint=False)):
-            mask = np.logical_and(channel >= start, channel< start + step)
-            val = np.logical_and(mask, sample_mask)
-            result[c, i] = np.count_nonzero(val)
-
-    result = result.reshape(-1)
-    return result / result.sum()
-
-def get_histograms(hockey_dir, bins):
-    hist_filename = get_filepath(hockey_dir, 'hist.npz')
-    if os.path.isfile(hist_filename):
-        npzfile = np.load(hist_filename)
-        return npzfile['features'], npzfile['labels']
-    else:
-        image_dir = get_filepath(hockey_dir, 'images')
-        gt_filepath = get_filepath(image_dir, 'gt.txt')
-        samples = np.load(get_filepath(hockey_dir, 'samples.npy'))
-
-        features = []
-        labels = []
-
-        with open(gt_filepath, 'r') as gt:
-            for sample_gt in csv.reader(gt):
-                sample = samples[int(sample_gt[0])]
-                sample_hist = hist(sample, bins=bins)
-
-                features.append(sample_hist)
-                labels.append(int(sample_gt[-1]))
-
-        features = np.array(features)
-        labels = np.array(labels)
-        np.savez(hist_filename, features=features, labels=labels)
-        return features, labels
-
-def classify(hockey_dir):
-    features, labels = get_histograms(hockey_dir, 5)
-
-    validation(features, labels)
-
-def main():
-    if len(sys.argv) != 3:
-        print("usage: {command} (markup|classify) hockey_dir".format(command=sys.argv[0]))
-        sys.exit(1)
-
-    hockey_dir = sys.argv[2]
-
-    if sys.argv[1] == 'markup':
-        user_interface(hockey_dir, markup)
-    elif sys.argv[1] == 'classify':
-        classify(hockey_dir)
-    else:
-        print('Unknown command!', file=sys.stderr)
-
-if __name__ == '__main__':
-    main()
