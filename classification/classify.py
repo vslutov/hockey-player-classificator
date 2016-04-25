@@ -3,6 +3,7 @@
 
 import os.path
 import csv
+import itertools
 
 import numpy as np
 
@@ -61,23 +62,22 @@ def get_histograms(hockey_dir, bins):
         npzfile = np.load(hist_filename)
         return npzfile['features'], npzfile['labels']
     else:
-        image_dir = get_filepath(hockey_dir, 'images')
-        gt_filepath = get_filepath(image_dir, 'gt.txt')
-        samples = np.load(get_filepath(hockey_dir, 'samples.npy'))
+        gt_filepath = get_filepath(hockey_dir, 'gt.txt')
 
         features = []
         labels = []
 
         with open(gt_filepath, 'r') as gt:
-            for sample_gt in csv.reader(gt):
-                sample = samples[int(sample_gt[0])]
-                sample_hist = hist(sample, bins=bins)
+            labels = [int(line[-1]) for line in csv.reader(gt)]
 
-                features.append(sample_hist)
-                labels.append(int(sample_gt[-1]))
+        for i in itertools.count():
+            new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
+            features.extend(hist(sample, bins=bins) for sample in new_samples)
+            if len(features) >= len(labels):
+                break
 
-        features = np.array(features)
-        labels = np.array(labels)
+        features = np.array(features[:len(labels)], dtype=np.float32)
+        labels = np.array(labels, dtype=np.int32)
         np.savez(hist_filename, features=features, labels=labels)
         return features, labels
 
