@@ -49,13 +49,24 @@ def update_previous(previous_props, label_image):
 
     return result
 
-def get_max_sample(gt_filepath):
+def get_sample_nums(gt_filepath):
     max_sample = -1
     with open(gt_filepath, 'r') as gt:
         previous_gt = [line for line in csv.reader(gt)]
         if len(previous_gt) > 0:
             max_sample = max(int(line[0]) for line in previous_gt)
-    return max_sample
+            start_frame = previous_gt[-1][1]
+            start_frame = int(start_frame[len('input'):-len('.png')])
+            for i, line in enumerate(previous_gt):
+                if line[1] == 'input{i}.png'.format(i=start_frame - 1):
+                    start_frame -= 1
+                    start_sample = i
+                    break
+            print(start_frame)
+        else:
+            max_sample, start_frame, start_sample = -1, 3600, 0
+
+    return max_sample, start_frame, start_sample
 
 def save_samples(hockey_dir, new_samples):
     np.save(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=new_samples[0])),
@@ -121,10 +132,9 @@ def markup(hockey_dir, ax):
     updater = Updater()
 
     image_dir = get_filepath(hockey_dir, 'images')
-    sample_num = 0
 
     gt_filepath = get_filepath(hockey_dir, 'gt.txt')
-    start_sample = get_max_sample(gt_filepath)
+    max_sample, start_frame, sample_num = get_sample_nums(gt_filepath)
 
     with open(gt_filepath, 'r') as gt:
         previous_gt = [line for line in csv.reader(gt)]
@@ -132,7 +142,7 @@ def markup(hockey_dir, ax):
     with open(gt_filepath, 'a') as gt:
         previous_props = []
 
-        for i in itertools.count(3600):
+        for i in itertools.count(start_frame):
             try:
                 frame_filename = 'input{i}.png'.format(i=i)
                 frame = io.imread(get_filepath(image_dir, frame_filename))
@@ -163,7 +173,7 @@ def markup(hockey_dir, ax):
                 filled_image = np.zeros(frame.shape[:2], dtype=bool)
                 filled_image[minr:maxr, minc:maxc] = region.filled_image
 
-                if sample_num > start_sample:
+                if sample_num > max_sample:
 
                     updater.value = get_label(filled_image, previous_props)
 
