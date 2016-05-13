@@ -7,35 +7,55 @@ import itertools
 
 import numpy as np
 
+from matplotlib import pyplot as plt
+
 from skimage import color
-from sklearn import neighbors
+from sklearn import neighbors, cross_validation, svm, ensemble
+import xgboost as xgb
 
 from markup import get_filepath
+
+def calc_percentage(clf, X_train, X_test, y_train, y_test):
+    clf.fit(X_train, y_train)
+    result = clf.predict(X_test)
+    result_mask = result == y_test
+
+    return 100 * result_mask.sum() / result.shape[0]
 
 def validation(X, y):
     _X, _y = np.array(X), np.array(y)
     X = []
     y = []
     for i in range(_y.shape[0]):
-        if _y[i] not in [0, 4]:
+        if _y[i] in [1, 2, 3]:
             X.append(_X[i])
             y.append(_y[i])
 
     X = np.array(X)
     y = np.array(y)
 
-    train_size = int(X.shape[0] * 0.2)
+    abscissa = np.arange(0.2, 0.95, 0.1)
 
-    X_train, X_test, y_train, y_test = \
-        X[:train_size], X[train_size:], y[:train_size], y[train_size:]
-        # cross_validation.train_test_split(X, y, test_size=0.8, random_state=42)
+    for label, clf in [('KNN', neighbors.KNeighborsClassifier(10, weights='distance', metric='manhattan')),
+                      ('SVM', svm.LinearSVC(C=10.0)),
+                      ('RandomForest', ensemble.RandomForestClassifier(random_state=42)),
+                      ('Boosting', ensemble.GradientBoostingClassifier(random_state=42)),
+                      ('XGBoost', xgb.XGBClassifier(seed=42))]:
 
-    clf = neighbors.KNeighborsClassifier(10, weights='distance', metric='manhattan')
-    clf.fit(X_train, y_train)
-    result = clf.predict(X_test)
-    result_mask = result == y_test
+        ordinata = []
+        for part in abscissa:
+            train_size = int(X.shape[0] * part)
 
-    print(result_mask.sum() / result.shape[0])
+            X_train, X_test, y_train, y_test = \
+                cross_validation.train_test_split(X, y, test_size=1 - part, random_state=42)
+                # X[:train_size], X[train_size:], y[:train_size], y[train_size:]
+
+            ordinata.append(calc_percentage(clf, X_train, X_test, y_train, y_test))
+
+        plt.plot(abscissa, ordinata, label=label)
+
+    plt.legend(loc='lower left')
+    plt.show()
 
 def hist(sample, bins):
     begin, end = -128, 128.001
