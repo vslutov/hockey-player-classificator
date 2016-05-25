@@ -10,8 +10,9 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from skimage import color
-from sklearn import neighbors, cross_validation, svm, ensemble
+from sklearn import neighbors, cross_validation, svm, ensemble, cluster
 import xgboost as xgb
+import sys
 
 from markup import get_filepath
 
@@ -44,11 +45,12 @@ def validation(X, y):
 
         ordinata = []
         for part in abscissa:
+            print(part)
             train_size = int(X.shape[0] * part)
 
             X_train, X_test, y_train, y_test = \
-                cross_validation.train_test_split(X, y, test_size=1 - part, random_state=42)
-                # X[:train_size], X[train_size:], y[:train_size], y[train_size:]
+                X[:train_size], X[train_size:], y[:train_size], y[train_size:]
+                # cross_validation.train_test_split(X, y, test_size=1 - part, random_state=42)
 
             ordinata.append(calc_percentage(clf, X_train, X_test, y_train, y_test))
 
@@ -84,7 +86,7 @@ def get_histograms(hockey_dir, bins):
     else:
         gt_filepath = get_filepath(hockey_dir, 'gt.txt')
 
-        features = []
+        colors = []
         labels = []
 
         with open(gt_filepath, 'r') as gt:
@@ -92,11 +94,23 @@ def get_histograms(hockey_dir, bins):
 
         for i in itertools.count():
             new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
-            features.extend(hist(sample, bins=bins) for sample in new_samples)
-            if len(features) >= len(labels):
+            colors.extend(sample.reshape((-1, 4)) for sample in new_samples)
+            if len(colors) >= len(labels):
                 break
 
-        features = np.array(features[:len(labels)], dtype=np.float32)
+        colors = np.array(colors[:len(labels)], dtype=np.float32)
+
+        HIST_SIZE = 100
+        HistClf = cluster.MiniBatchKMeans(n_clusters=HIST_SIZE, batch_size=1000)
+        HistClf.fit(colors.reshape((-1, 4))[:100000, :])
+
+        features = []
+        for img in colors:
+            hist = np.bincount(HistClf.predict(img), minlength=HIST_SIZE)
+            hist = hist.astype(np.float32) / hist.sum()
+            features.append(hist)
+
+        features = np.array(features, dtype=np.float32)
         labels = np.array(labels, dtype=np.int32)
         np.savez(hist_filename, features=features, labels=labels)
         return features, labels
