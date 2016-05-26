@@ -74,6 +74,11 @@ def save_samples(hockey_dir, new_samples):
     new_samples[0] += 1
     new_samples[1] = []
 
+def save_chains(hockey_dir, chains):
+    with open(get_filepath(hockey_dir, 'chains.txt'), 'w') as output:
+        for chain in chains:
+            print(','.join(str(elem) for elem in chain), file=output)
+
 def update_samples(hockey_dir, ):
     for filename in glob.iglob(get_filepath(hockey_dir, 'samples_*.npy')):
         os.remove(filename)
@@ -81,6 +86,8 @@ def update_samples(hockey_dir, ):
     image_dir = get_filepath(hockey_dir, 'images')
     sample_num = 0
     new_samples = [0, []]
+    chains = []
+    previous_props = []
 
     for i in itertools.count(3600):
         try:
@@ -91,6 +98,7 @@ def update_samples(hockey_dir, ):
 
         except FileNotFoundError:
             save_samples(hockey_dir, new_samples)
+            save_chains(hockey_dir, chains)
             break
 
         # apply threshold
@@ -102,6 +110,10 @@ def update_samples(hockey_dir, ):
         label_image = measure.label(cleared)
         current_props = measure.regionprops(label_image)
 
+
+        previous_props = update_previous(previous_props, label_image)
+        next_props = []
+
         for region in current_props:
             if region.area < 250:
                 continue
@@ -111,7 +123,6 @@ def update_samples(hockey_dir, ):
             filled_image = np.zeros(frame.shape[:2], dtype=bool)
             filled_image[minr:maxr, minc:maxc] = region.filled_image
 
-
             sample = transform.resize(frame[minr:maxr, minc:maxc], (64, 32))
             sample_mask = region.filled_image.astype(np.uint8) * 255
             sample_mask = transform.resize(sample_mask, (64, 32))
@@ -119,12 +130,21 @@ def update_samples(hockey_dir, ):
 
             new_samples[1].append(sample)
 
-            print(sample_num)
+            chain_number = get_label(filled_image, previous_props)
+            if chain_number == -1:
+                chain_number = len(chains)
+                chains.append([])
+
+            chains[chain_number].append(sample_num)
+            next_props.append((filled_image, chain_number))
+
             sample_num += 1
 
             if sample_num % 1000 == 0:
                 save_samples(hockey_dir, new_samples)
+                save_chains(hockey_dir, chains)
 
+        previous_props = next_props
 
 def markup(hockey_dir, ax):
     class Updater:
