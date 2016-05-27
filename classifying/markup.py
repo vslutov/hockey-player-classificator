@@ -91,11 +91,11 @@ def update_samples(hockey_dir, ):
 
     for i in itertools.count(3600):
         try:
+            BORDER = 80
             frame_filename = 'input{i}.png'.format(i=i)
-            frame = io.imread(get_filepath(image_dir, frame_filename))
-            mask = io.imread(get_filepath(image_dir, 'mask{i}.png'.format(i=i)))
+            frame = io.imread(get_filepath(image_dir, frame_filename))[:-BORDER]
+            mask = io.imread(get_filepath(image_dir, 'mask{i}.png'.format(i=i)))[:-BORDER]
             mask = color.rgb2gray(mask)
-
         except FileNotFoundError:
             save_samples(hockey_dir, new_samples)
             save_chains(hockey_dir, chains)
@@ -103,13 +103,11 @@ def update_samples(hockey_dir, ):
 
         # apply threshold
         cleared = mask > 128
-        # remove artifacts connected to image border
-        segmentation.clear_border(cleared)
+        cleared = segmentation.clear_border(cleared)
 
         # label image regions
         label_image = measure.label(cleared)
         current_props = measure.regionprops(label_image)
-
 
         previous_props = update_previous(previous_props, label_image)
         next_props = []
@@ -140,7 +138,8 @@ def update_samples(hockey_dir, ):
 
             sample_num += 1
 
-            if sample_num % 1000 == 0:
+            if sample_num % 500 == 0:
+                print(sample_num)
                 save_samples(hockey_dir, new_samples)
                 save_chains(hockey_dir, chains)
 
