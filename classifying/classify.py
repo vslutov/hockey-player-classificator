@@ -28,7 +28,7 @@ def validation(X, y):
     X = []
     y = []
     for i in range(_y.shape[0]):
-        if _y[i] in [1, 2, 3]:
+        # if _y[i] in [1, 2, 3]:
             X.append(_X[i])
             y.append(_y[i])
 
@@ -90,19 +90,22 @@ def get_histograms(hockey_dir, bins):
         labels = []
 
         with open(gt_filepath, 'r') as gt:
-            labels = [int(line[-1]) for line in csv.reader(gt)]
+            vals = [[int(elem) for elem in line] for line in csv.reader(gt)]
+            keys = [line[0] for line in vals]
+            labels = [line[1] for line in vals]
 
         for i in itertools.count():
-            new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
-            colors.extend(sample.reshape((-1, 4)) for sample in new_samples)
-            if len(colors) >= len(labels):
+            try:
+                new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
+                colors.extend(sample.reshape((-1, 4)) for sample in new_samples)
+            except FileNotFoundError:
                 break
 
-        colors = np.array(colors[:len(labels)], dtype=np.float32)
+        colors = np.array(list(colors[key] for key in keys), dtype=np.float32)
 
         HIST_SIZE = 100
         HistClf = cluster.MiniBatchKMeans(n_clusters=HIST_SIZE, batch_size=1000)
-        HistClf.fit(colors.reshape((-1, 4))[:100000, :])
+        HistClf.fit(colors.reshape((-1, 4)))
 
         features = []
         for img in colors:
