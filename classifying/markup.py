@@ -168,6 +168,7 @@ def markup(hockey_dir, ax):
             samples.extend(sample for sample in new_samples)
         except FileNotFoundError:
             break
+    shape = (samples[0].shape[0], samples[0].shape[1], 3)
 
     with open(gt_filepath, 'a') as gt:
         for chain in chains:
@@ -180,7 +181,11 @@ def markup(hockey_dir, ax):
 
             if updater.value == -1 and len(chain) >= 10:
 
-                sample = samples[int(chain[5])][:, :, :3]
+                sample = np.zeros((shape[0] * 2, shape[1] * 2, shape[2]))
+                sample[:shape[0], :shape[1]] = samples[chain[0]][:, :, :3]
+                sample[shape[0]:, :shape[1]] = samples[chain[5]][:, :, :3]
+                sample[:shape[0], shape[1]:] = samples[chain[9]][:, :, :3]
+                sample[shape[0]:, shape[1]:] = samples[chain[-1]][:, :, :3]
 
                 ax.cla()
                 ax.imshow(sample)
