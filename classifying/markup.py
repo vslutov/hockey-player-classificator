@@ -268,7 +268,7 @@ def user_interface(hockey_dir, interface_generator):
         add_button(root, '2', 'White team')
         add_button(root, '3', 'Orbiter')
         add_button(root, '4', 'Intersection')
-        add_button(root, '5', 'Operator')
+        add_button(root, '5', 'Trash')
         add_button(root, '0', 'Non-person')
 
     make_root()

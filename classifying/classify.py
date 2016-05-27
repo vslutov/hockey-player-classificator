@@ -28,7 +28,7 @@ def validation(X, y):
     X = []
     y = []
     for i in range(_y.shape[0]):
-        # if _y[i] in [1, 2, 3]:
+        if _y[i] != 5:
             X.append(_X[i])
             y.append(_y[i])
 
@@ -105,12 +105,17 @@ def get_histograms(hockey_dir, bins):
 
         HIST_SIZE = 100
         HistClf = cluster.MiniBatchKMeans(n_clusters=HIST_SIZE, batch_size=1000)
-        HistClf.fit(colors.reshape((-1, 4)))
+        HistClf.fit(colors.reshape((-1, 4))[:10**6, :3])
+
+        def get_hist(img):
+            img = img[img[:,3] != 0][:, :3]
+            hist = np.bincount(HistClf.predict(img), minlength=HIST_SIZE)
+            return hist.astype(np.float32) / hist.sum()
 
         features = []
         for img in colors:
-            hist = np.bincount(HistClf.predict(img), minlength=HIST_SIZE)
-            hist = hist.astype(np.float32) / hist.sum()
+            hist = np.hstack([get_hist(img[:img.shape[0] // 2]),
+                              get_hist(img[img.shape[0] // 2:])])
             features.append(hist)
 
         features = np.array(features, dtype=np.float32)
