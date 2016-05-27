@@ -153,73 +153,46 @@ def markup(hockey_dir, ax):
     image_dir = get_filepath(hockey_dir, 'images')
 
     gt_filepath = get_filepath(hockey_dir, 'gt.txt')
-    max_sample, start_frame, sample_num = get_sample_nums(gt_filepath)
+    chains_filepath = get_filepath(hockey_dir, 'chains.txt')
+
+    with open(chains_filepath, 'r') as chain_fd:
+        chains = [[int(elem) for elem in chain.split(',')] for chain in chain_fd]
 
     with open(gt_filepath, 'r') as gt:
-        previous_gt = [line for line in csv.reader(gt)]
+        previous_gt = {int(line[0]): line[1] for line in csv.reader(gt)}
+
+    samples = []
+    for i in itertools.count():
+        try:
+            new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
+            samples.extend(sample for sample in new_samples)
+        except FileNotFoundError:
+            break
 
     with open(gt_filepath, 'a') as gt:
-        previous_props = []
+        for chain in chains:
+            updater.value = -1
 
-        for i in itertools.count(start_frame):
-            try:
-                frame_filename = 'input{i}.png'.format(i=i)
-                frame = io.imread(get_filepath(image_dir, frame_filename))
-                mask = io.imread(get_filepath(image_dir, 'mask{i}.png'.format(i=i)))
-                mask = color.rgb2gray(mask)
+            for elem in chain:
+                if elem in previous_gt:
+                    updater.value = previous_gt[elem]
+                    break
 
-            except FileNotFoundError:
-                break
+            if updater.value == -1 and len(chain) >= 10:
 
-            # apply threshold
-            cleared = mask > 128
-            # remove artifacts connected to image border
-            segmentation.clear_border(cleared)
+                sample = samples[int(chain[5])][:, :, :3]
 
-            # label image regions
-            label_image = measure.label(cleared)
-            current_props = measure.regionprops(label_image)
+                ax.cla()
+                ax.imshow(sample)
 
-            previous_props = update_previous(previous_props, label_image)
-            next_props = []
+                yield updater
 
-            for region in current_props:
-                if region.area < 250:
-                    continue
-
-                minr, minc, maxr, maxc = region.bbox
-
-                filled_image = np.zeros(frame.shape[:2], dtype=bool)
-                filled_image[minr:maxr, minc:maxc] = region.filled_image
-
-                if sample_num > max_sample:
-
-                    updater.value = get_label(filled_image, previous_props)
-
-                    if updater.value == -1:
-                        rect = matplotlib.patches.Rectangle((minc, minr), maxc - minc, maxr - minr,
-                                          fill=False, edgecolor='red', linewidth=2)
-
-                        ax.cla()
-                        ax.imshow(frame)
-                        ax.add_patch(rect)
-
-                        yield updater
-
-                    if updater.value == -1:
-                        return
-                    else:
-                        print(sample_num, frame_filename, minr, minc, maxr, maxc, updater.value, sep=',', file=gt)
-
+                if updater.value == -1:
+                    return
                 else:
-                    updater.value = previous_gt[sample_num][-1]
-
-                next_props.append((filled_image, updater.value))
-
-                print(sample_num)
-                sample_num += 1
-
-            previous_props = next_props
+                    for elem in chain:
+                        print(elem, updater.value, sep=',', file=gt)
+                        previous_gt[elem] = updater.value
 
 def user_interface(hockey_dir, interface_generator):
 
