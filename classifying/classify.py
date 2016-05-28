@@ -11,6 +11,7 @@ from matplotlib import pyplot as plt
 
 from skimage import color
 from sklearn import neighbors, cross_validation, svm, ensemble, cluster
+from sklearn.externals import joblib
 import xgboost as xgb
 import sys
 
@@ -59,26 +60,23 @@ def validation(X, y):
     plt.legend(loc='lower left')
     plt.show()
 
-def hist(sample, bins):
-    begin, end = -128, 128.001
-    step = (end - begin) / bins
-    result = np.zeros((3, bins))
+HIST_SIZE = 100
 
-    sample_mask = sample[:, :, 3] > 0.5
-    sample[:, :, 0:3] = color.rgb2lab(sample[:, :, 0:3])
+def prepare_buckets(colors):
+    buckets = cluster.MiniBatchKMeans(n_clusters=HIST_SIZE, batch_size=1000)
+    buckets.fit(colors.reshape((-1, 4))[:10**6, :3])
+    return buckets
 
-    for c in [0, 1, 2]:
-        channel = sample[:, :, c]
-        for i, start in enumerate(np.linspace(begin, end,
-                                              bins, endpoint=False)):
-            mask = np.logical_and(channel >= start, channel< start + step)
-            val = np.logical_and(mask, sample_mask)
-            result[c, i] = np.count_nonzero(val)
+def extract_feature(img, buckets):
+    img = img.reshape((-1, 4))
+    def _get_hist(img):
+        img = img[img[:,3] != 0][:, :3]
+        hist = np.bincount(buckets.predict(img), minlength=HIST_SIZE)
+        return hist.astype(np.float32) / hist.sum()
+    return np.hstack([_get_hist(img[:img.shape[0] // 2]),
+                      _get_hist(img[img.shape[0] // 2:])])
 
-    result = result.reshape(-1)
-    return result / result.sum()
-
-def get_histograms(hockey_dir, bins):
+def get_ground_truth(hockey_dir, bins):
     hist_filename = get_filepath(hockey_dir, 'hist.npz')
     if os.path.isfile(hist_filename):
         npzfile = np.load(hist_filename)
@@ -102,28 +100,43 @@ def get_histograms(hockey_dir, bins):
                 break
 
         colors = np.array(list(colors[key] for key in keys), dtype=np.float32)
-
-        HIST_SIZE = 100
-        HistClf = cluster.MiniBatchKMeans(n_clusters=HIST_SIZE, batch_size=1000)
-        HistClf.fit(colors.reshape((-1, 4))[:10**6, :3])
-
-        def get_hist(img):
-            img = img[img[:,3] != 0][:, :3]
-            hist = np.bincount(HistClf.predict(img), minlength=HIST_SIZE)
-            return hist.astype(np.float32) / hist.sum()
+        buckets = prepare_buckets(colors)
+        joblib.dump(buckets, get_filepath(hockey_dir, 'buckets.pkl'))
 
         features = []
         for img in colors:
-            hist = np.hstack([get_hist(img[:img.shape[0] // 2]),
-                              get_hist(img[img.shape[0] // 2:])])
-            features.append(hist)
+            features.append(extract_feature(img, buckets))
 
         features = np.array(features, dtype=np.float32)
         labels = np.array(labels, dtype=np.int32)
         np.savez(hist_filename, features=features, labels=labels)
         return features, labels
 
-def classify(hockey_dir):
-    features, labels = get_histograms(hockey_dir, 5)
+def get_classifier(hockey_dir, X, y):
+    clf_filename = get_filepath(hockey_dir, 'player_clf.pkl')
+    if os.path.isfile(clf_filename):
+        return joblib.load(clf_filename)
 
-    validation(features, labels)
+    _X, _y = np.array(X), np.array(y)
+    X = []
+    y = []
+    for i in range(_y.shape[0]):
+        if _y[i] != 5:
+            X.append(_X[i])
+            y.append(_y[i])
+
+    X = np.array(X)
+    y = np.array(y)
+
+    clf = xgb.XGBClassifier(seed=42)
+    clf.fit(X, y)
+    joblib.dump(clf, clf_filename)
+
+    return clf
+
+def classify(hockey_dir):
+    features, labels = get_ground_truth(hockey_dir, 5)
+    clf = get_classifier(hockey_dir, features, labels)
+    result = clf.predict(features)
+    result_mask = result == labels
+    print(100 * result_mask.sum() / result.shape[0])
