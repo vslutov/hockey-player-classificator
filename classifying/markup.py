@@ -6,6 +6,7 @@ import os.path
 import glob
 import itertools
 import csv
+import tarfile
 
 if sys.version_info[0] < 3:
     import Tkinter as Tk
@@ -13,6 +14,7 @@ else:
     import tkinter as Tk
 
 import numpy as np
+import cv2
 
 import matplotlib
 matplotlib.use('TkAgg')
@@ -20,7 +22,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.backend_bases import key_press_handler
 from matplotlib.figure import Figure
 
-from skimage import segmentation, measure, io, color, transform
+from skimage import segmentation, measure, io, transform
 
 def get_filepath(source_dir, filename):
     return os.path.abspath(os.path.join(os.path.expanduser(source_dir), filename))
@@ -43,9 +45,9 @@ def update_previous(previous_props, label_image):
     for prop, label in previous_props:
         not_interesting = np.logical_not(prop)
         interesting = np.ma.MaskedArray(label_image, not_interesting)
-        if np.logical_or(np.logical_or(background, not_interesting),
-                         label_image == interesting.max()).all():
-            result.append((prop, label))
+        find = interesting.max()
+        if np.logical_or(interesting == find, background).all():
+            result.append((label_image == find, label))
 
     return result
 
@@ -79,27 +81,32 @@ def save_chains(hockey_dir, chains):
         for chain in chains:
             print(','.join(str(elem) for elem in chain), file=output)
 
-def update_samples(hockey_dir, ):
+def update_samples(hockey_dir):
     for filename in glob.iglob(get_filepath(hockey_dir, 'samples_*.npy')):
         os.remove(filename)
 
-    image_dir = get_filepath(hockey_dir, 'images')
+    video_dir = get_filepath(hockey_dir, 'work_video')
+    mask_dir = get_filepath(hockey_dir, 'masks')
+    video_template = get_filepath(video_dir, 'cska_akbars_cam_3_{begin}_{end}.avi')
+
     sample_num = 0
     new_samples = [0, []]
     chains = []
     previous_props = []
 
-    for i in itertools.count(3600):
-        try:
-            BORDER = 80
-            frame_filename = 'input{i}.png'.format(i=i)
-            frame = io.imread(get_filepath(image_dir, frame_filename))[:-BORDER]
-            mask = io.imread(get_filepath(image_dir, 'mask{i}.png'.format(i=i)))[:-BORDER]
-            mask = color.rgb2gray(mask)
-        except FileNotFoundError:
-            save_samples(hockey_dir, new_samples)
-            save_chains(hockey_dir, chains)
-            break
+    video = cv2.VideoCapture()
+
+    for i in range(0, 165600):
+        ret, frame = video.read()
+        if ret is False:
+            if video.open(video_template.format(begin=i, end=i + 1199)):
+                ret, frame = video.read()
+            else:
+                continue
+
+        BORDER = 80
+        frame = frame[:-BORDER]
+        mask = io.imread(get_filepath(mask_dir, 'mask{i}.png'.format(i=i)), 0)[:-BORDER]
 
         # apply threshold
         cleared = mask > 128
@@ -139,18 +146,21 @@ def update_samples(hockey_dir, ):
             sample_num += 1
 
             if sample_num % 500 == 0:
-                print(sample_num)
+                print('sample', sample_num, ', frame', i)
                 save_samples(hockey_dir, new_samples)
                 save_chains(hockey_dir, chains)
 
         previous_props = next_props
 
+
+    video.release()
+    save_samples(hockey_dir, new_samples)
+    save_chains(hockey_dir, chains)
+
 def markup(hockey_dir, ax):
     class Updater:
         value = None
     updater = Updater()
-
-    image_dir = get_filepath(hockey_dir, 'images')
 
     gt_filepath = get_filepath(hockey_dir, 'gt.txt')
     chains_filepath = get_filepath(hockey_dir, 'chains.txt')
