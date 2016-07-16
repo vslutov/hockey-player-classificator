@@ -96,64 +96,66 @@ def update_samples(hockey_dir):
 
     video = cv2.VideoCapture()
 
-    for i in range(0, 165600):
-        ret, frame = video.read()
-        if ret is False:
-            if video.open(video_template.format(begin=i, end=i + 1199)):
-                ret, frame = video.read()
-            else:
+    with open(get_filepath(hockey_dir, 'coords.csv'), 'w') as coords:
+        for i in range(0, 165600):
+            ret, frame = video.read()
+            if ret is False:
+                if video.open(video_template.format(begin=i, end=i + 1199)):
+                    ret, frame = video.read()
+                else:
+                    continue
+
+            BORDER = 80
+            frame = frame[:-BORDER]
+            try:
+                mask = io.imread(get_filepath(mask_dir, 'mask{i}.png'.format(i=i)), 0)[:-BORDER]
+            except FileNotFoundError:
                 continue
 
-        BORDER = 80
-        frame = frame[:-BORDER]
-        try:
-            mask = io.imread(get_filepath(mask_dir, 'mask{i}.png'.format(i=i)), 0)[:-BORDER]
-        except FileNotFoundError:
-            continue
+            # apply threshold
+            cleared = mask > 128
+            cleared = segmentation.clear_border(cleared)
 
-        # apply threshold
-        cleared = mask > 128
-        cleared = segmentation.clear_border(cleared)
+            # label image regions
+            label_image = measure.label(cleared)
+            current_props = measure.regionprops(label_image)
 
-        # label image regions
-        label_image = measure.label(cleared)
-        current_props = measure.regionprops(label_image)
+            previous_props = update_previous(previous_props, label_image)
+            next_props = []
 
-        previous_props = update_previous(previous_props, label_image)
-        next_props = []
+            for region in current_props:
+                if region.area < 250:
+                    continue
 
-        for region in current_props:
-            if region.area < 250:
-                continue
+                minr, minc, maxr, maxc = region.bbox
+                print(sample_num, i, minr, minc, maxr, maxc, sep=',', file=coords)
 
-            minr, minc, maxr, maxc = region.bbox
+                filled_image = np.zeros(frame.shape[:2], dtype=bool)
+                filled_image[minr:maxr, minc:maxc] = region.filled_image
 
-            filled_image = np.zeros(frame.shape[:2], dtype=bool)
-            filled_image[minr:maxr, minc:maxc] = region.filled_image
+                sample = transform.resize(frame[minr:maxr, minc:maxc], (64, 32))
+                sample_mask = region.filled_image.astype(np.uint8) * 255
+                sample_mask = transform.resize(sample_mask, (64, 32))
+                sample = np.dstack((sample, sample_mask))
 
-            sample = transform.resize(frame[minr:maxr, minc:maxc], (64, 32))
-            sample_mask = region.filled_image.astype(np.uint8) * 255
-            sample_mask = transform.resize(sample_mask, (64, 32))
-            sample = np.dstack((sample, sample_mask))
+                new_samples[1].append(sample)
 
-            new_samples[1].append(sample)
+                chain_number = get_label(filled_image, previous_props)
+                if chain_number == -1:
+                    chain_number = len(chains)
+                    chains.append([])
 
-            chain_number = get_label(filled_image, previous_props)
-            if chain_number == -1:
-                chain_number = len(chains)
-                chains.append([])
+                chains[chain_number].append(sample_num)
+                next_props.append((filled_image, chain_number))
 
-            chains[chain_number].append(sample_num)
-            next_props.append((filled_image, chain_number))
+                sample_num += 1
 
-            sample_num += 1
+                if sample_num % 10000 == 0:
+                    print('sample', sample_num, ', frame', i)
+                    save_samples(hockey_dir, new_samples)
+                    save_chains(hockey_dir, chains)
 
-            if sample_num % 500 == 0:
-                print('sample', sample_num, ', frame', i)
-                save_samples(hockey_dir, new_samples)
-                save_chains(hockey_dir, chains)
-
-        previous_props = next_props
+            previous_props = next_props
 
 
     video.release()
