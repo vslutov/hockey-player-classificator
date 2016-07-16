@@ -47,7 +47,7 @@ def update_previous(previous_props, label_image):
         interesting = np.ma.MaskedArray(label_image, not_interesting)
         find = interesting.max()
         if np.logical_or(interesting == find, background).all():
-            result.append((label_image == find, label))
+            result.append((prop, label))
 
     return result
 
@@ -106,7 +106,10 @@ def update_samples(hockey_dir):
 
         BORDER = 80
         frame = frame[:-BORDER]
-        mask = io.imread(get_filepath(mask_dir, 'mask{i}.png'.format(i=i)), 0)[:-BORDER]
+        try:
+            mask = io.imread(get_filepath(mask_dir, 'mask{i}.png'.format(i=i)), 0)[:-BORDER]
+        except FileNotFoundError:
+            continue
 
         # apply threshold
         cleared = mask > 128
