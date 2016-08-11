@@ -33,36 +33,36 @@ def get_ground_truth(hockey_dir):
     if os.path.isfile(hist_filename):
         npzfile = np.load(hist_filename)
         return npzfile['features'], npzfile['labels']
-    else:
-        gt_filepath = get_filepath(hockey_dir, 'gt.txt')
 
-        colors = []
-        labels = []
+    gt_filepath = get_filepath(hockey_dir, 'gt.txt')
 
-        with open(gt_filepath, 'r') as gt:
-            vals = [[int(elem) for elem in line] for line in csv.reader(gt)]
-            keys = [line[0] for line in vals]
-            labels = [line[1] for line in vals]
+    colors = []
+    labels = []
 
-        for i in itertools.count():
-            try:
-                new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
-                colors.extend(sample.reshape((-1, 4)) for sample in new_samples)
-            except FileNotFoundError:
-                break
+    with open(gt_filepath, 'r') as gt:
+        vals = [[int(elem) for elem in line] for line in csv.reader(gt)]
+        keys = [line[0] for line in vals]
+        labels = [line[1] for line in vals]
 
-        colors = np.array(list(colors[key] for key in keys), dtype=np.float32)
-        buckets = prepare_buckets(colors)
-        joblib.dump(buckets, get_filepath(hockey_dir, 'buckets.pkl'))
+    for i in itertools.count():
+        try:
+            new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
+            colors.extend(sample.reshape((-1, 4)) for sample in new_samples)
+        except FileNotFoundError:
+            break
 
-        features = []
-        for img in colors:
-            features.append(extract_feature(img, buckets))
+    colors = np.array(list(colors[key] for key in keys), dtype=np.float32)
+    buckets = prepare_buckets(colors)
+    # joblib.dump(buckets, get_filepath(hockey_dir, 'buckets.pkl'))
 
-        features = np.array(features, dtype=np.float32)
-        labels = np.array(labels, dtype=np.int32)
-        np.savez(hist_filename, features=features, labels=labels)
-        return features, labels
+    features = []
+    for img in colors:
+        features.append(extract_feature(img, buckets))
+
+    features = np.array(features, dtype=np.float32)
+    labels = np.array(labels, dtype=np.int32)
+    # np.savez(hist_filename, features=features, labels=labels)
+    return features, labels
 
 def get_classifier(hockey_dir, X, y):
     clf_filename = get_filepath(hockey_dir, 'player_clf.pkl')
@@ -86,6 +86,39 @@ def get_classifier(hockey_dir, X, y):
 
     return clf
 
+import time
+
 def classify(hockey_dir):
     features, labels = get_ground_truth(hockey_dir)
-    get_classifier(hockey_dir, features, labels)
+    clf = get_classifier(hockey_dir, features, labels)
+
+    with open(get_filepath(hockey_dir, 'gt.txt'), 'r') as gt:
+        vals = [[int(elem) for elem in line] for line in csv.reader(gt)]
+        keys = [line[0] for line in vals]
+        labels = [line[1] for line in vals]
+
+    colors = []
+    for i in itertools.count():
+        try:
+            new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
+            colors.extend(sample.reshape((-1, 4)) for sample in new_samples)
+        except FileNotFoundError:
+            break
+
+    colors = np.array(list(colors[key] for key in keys), dtype=np.float32)
+    buckets = prepare_buckets(colors)
+    # joblib.dump(buckets, get_filepath(hockey_dir, 'buckets.pkl'))
+
+
+    count = 1
+
+    start = time.clock()
+    for i in range(count):
+        features = []
+        for img in colors:
+            features.append(extract_feature(img, buckets))
+
+        clf.predict(features)
+    elapsed = time.clock() - start
+
+    print(elapsed / count / len(features))
