@@ -7,6 +7,7 @@ import glob
 import itertools
 import csv
 import tarfile
+import functools
 
 if sys.version_info[0] < 3:
     import Tkinter as Tk
@@ -14,7 +15,7 @@ else:
     import tkinter as Tk
 
 import numpy as np
-import cv2
+# import cv2
 
 import matplotlib
 matplotlib.use('TkAgg')
@@ -23,6 +24,8 @@ from matplotlib.backend_bases import key_press_handler
 from matplotlib.figure import Figure
 
 from skimage import segmentation, measure, io, transform
+
+BUCKET_SIZE = 10000
 
 def get_filepath(source_dir, filename):
     return os.path.abspath(os.path.join(os.path.expanduser(source_dir), filename))
@@ -150,7 +153,7 @@ def update_samples(hockey_dir):
 
                 sample_num += 1
 
-                if sample_num % 10000 == 0:
+                if sample_num % BUCKET_SIZE == 0:
                     print('sample', sample_num, ', frame', i)
                     save_samples(hockey_dir, new_samples)
                     save_chains(hockey_dir, chains)
@@ -161,6 +164,14 @@ def update_samples(hockey_dir):
     video.release()
     save_samples(hockey_dir, new_samples)
     save_chains(hockey_dir, chains)
+
+@functools.lru_cache(maxsize=2)
+def get_bucket(hockey_dir, i):
+    return np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
+
+def get_sample(hockey_dir, i):
+    bucket = get_bucket(hockey_dir, i // BUCKET_SIZE)
+    return bucket[i % BUCKET_SIZE][:, :, 2::-1]
 
 def markup(hockey_dir, ax):
     class Updater:
@@ -176,14 +187,7 @@ def markup(hockey_dir, ax):
     with open(gt_filepath, 'r') as gt:
         previous_gt = {int(line[0]): line[1] for line in csv.reader(gt)}
 
-    samples = []
-    for i in itertools.count():
-        try:
-            new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
-            samples.extend(sample for sample in new_samples)
-        except FileNotFoundError:
-            break
-    shape = (samples[0].shape[0], samples[0].shape[1], 3)
+    shape = get_sample(hockey_dir, 0).shape
 
     with open(gt_filepath, 'a') as gt:
         for chain in chains:
@@ -197,10 +201,10 @@ def markup(hockey_dir, ax):
             if updater.value == -1 and len(chain) >= 10:
 
                 sample = np.zeros((shape[0] * 2, shape[1] * 2, shape[2]))
-                sample[:shape[0], :shape[1]] = samples[chain[0]][:, :, :3]
-                sample[shape[0]:, :shape[1]] = samples[chain[5]][:, :, :3]
-                sample[:shape[0], shape[1]:] = samples[chain[9]][:, :, :3]
-                sample[shape[0]:, shape[1]:] = samples[chain[-1]][:, :, :3]
+                sample[:shape[0], :shape[1]] = get_sample(hockey_dir, chain[0])
+                sample[shape[0]:, :shape[1]] = get_sample(hockey_dir, chain[5])
+                sample[:shape[0], shape[1]:] = get_sample(hockey_dir, chain[9])
+                sample[shape[0]:, shape[1]:] = get_sample(hockey_dir, chain[-1])
 
                 ax.cla()
                 ax.imshow(sample)
