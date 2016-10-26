@@ -53,7 +53,7 @@ def get_ground_truth(hockey_dir):
 
     colors = np.array(list(colors[key] for key in keys), dtype=np.float32)
     buckets = prepare_buckets(colors)
-    # joblib.dump(buckets, get_filepath(hockey_dir, 'buckets.pkl'))
+    joblib.dump(buckets, get_filepath(hockey_dir, 'buckets.pkl'))
 
     features = []
     for img in colors:
@@ -91,34 +91,33 @@ import time
 def classify(hockey_dir):
     features, labels = get_ground_truth(hockey_dir)
     clf = get_classifier(hockey_dir, features, labels)
+    print("Classificator created!")
 
-    with open(get_filepath(hockey_dir, 'gt.txt'), 'r') as gt:
-        vals = [[int(elem) for elem in line] for line in csv.reader(gt)]
-        keys = [line[0] for line in vals]
-        labels = [line[1] for line in vals]
+    # with open(get_filepath(hockey_dir, 'gt.txt'), 'r') as gt:
+    #     vals = [[int(elem) for elem in line] for line in csv.reader(gt)]
+    #     keys = [line[0] for line in vals]
+    #     labels = [line[1] for line in vals]
 
-    colors = []
-    for i in itertools.count():
-        try:
-            new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
-            colors.extend(sample.reshape((-1, 4)) for sample in new_samples)
-        except FileNotFoundError:
-            break
+    # colors = []
+    # for i in itertools.count():
+    #     try:
+    #         new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
+    #         colors.extend(sample.reshape((-1, 4)) for sample in new_samples)
+    #     except FileNotFoundError:
+    #         break
 
-    colors = np.array(list(colors[key] for key in keys), dtype=np.float32)
-    buckets = prepare_buckets(colors)
-    # joblib.dump(buckets, get_filepath(hockey_dir, 'buckets.pkl'))
+    # colors = np.array(list(colors[key] for key in keys), dtype=np.float32)
+    # buckets = joblib.load(get_filepath(hockey_dir, 'buckets.pkl'))
 
+    # count = 1
 
-    count = 1
+    # start = time.clock()
+    # for i in range(count):
+    #     features = []
+    #     for img in colors:
+    #         features.append(extract_feature(img, buckets))
 
-    start = time.clock()
-    for i in range(count):
-        features = []
-        for img in colors:
-            features.append(extract_feature(img, buckets))
+    #     clf.predict(features)
+    # elapsed = time.clock() - start
 
-        clf.predict(features)
-    elapsed = time.clock() - start
-
-    print(elapsed / count / len(features))
+    # print(elapsed / count / len(features))
