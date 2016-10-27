@@ -3,7 +3,6 @@
 
 import os.path
 import csv
-import itertools
 
 import numpy as np
 
@@ -44,9 +43,11 @@ def get_ground_truth(hockey_dir):
         keys = [line[0] for line in vals]
         labels = [line[1] for line in vals]
 
-    for i in itertools.count():
+    pack_size = np.load(get_filepath(hockey_dir, 'samples_0.npy')).shape[0]
+    for i in range(max(keys) // pack_size + 1):
         try:
             new_samples = np.load(get_filepath(hockey_dir, 'samples_{i}.npy'.format(i=i)))
+            print("read sample pack", i, "of", max(keys) // pack_size + 1)
             colors.extend(sample.reshape((-1, 4)) for sample in new_samples)
         except FileNotFoundError:
             break
@@ -85,8 +86,6 @@ def get_classifier(hockey_dir, X, y):
     joblib.dump(clf, clf_filename)
 
     return clf
-
-import time
 
 def classify(hockey_dir):
     features, labels = get_ground_truth(hockey_dir)
